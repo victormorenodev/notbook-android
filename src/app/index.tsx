@@ -29,14 +29,14 @@ export default function NotesCarouselScreen() {
   const { mutateAsync: deletePage } = useDeletePage();
 
   const [activeIndex, setActiveIndex] = useState(0);
-  const isCreatingRef = useRef(false);
+  const isInitializingRef = useRef(false);
 
-  // Initialize with a blank note if the database is empty
+  // Initialize with a blank note if the database is completely empty
   useEffect(() => {
-    if (!isLoading && pages.length === 0 && !isCreatingRef.current) {
-      isCreatingRef.current = true;
-      createPage({ title: '' }).finally(() => {
-        isCreatingRef.current = false;
+    if (!isLoading && pages.length === 0 && !isInitializingRef.current) {
+      isInitializingRef.current = true;
+      createPage({ input: { title: '' } }).finally(() => {
+        isInitializingRef.current = false;
       });
     }
   }, [isLoading, pages.length, createPage]);
@@ -47,13 +47,19 @@ export default function NotesCarouselScreen() {
   }, []);
 
   const handleCreateNewPage = useCallback(async () => {
-    const newPage = await createPage({ title: '' });
-    const targetIndex = pages.length;
+    const currentPage = pages[activeIndex];
+    const afterPos = currentPage ? currentPage.position : undefined;
+    const newPage = await createPage({
+      input: { title: '' },
+      afterPosition: afterPos,
+    });
+
+    const targetIndex = activeIndex + 1;
     setTimeout(() => {
-      scrollToPage(targetIndex);
-    }, 100);
+      scrollToPage(Math.min(targetIndex, pages.length));
+    }, 80);
     return newPage;
-  }, [createPage, pages.length, scrollToPage]);
+  }, [activeIndex, createPage, pages, scrollToPage]);
 
   const handleScrollEnd = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {

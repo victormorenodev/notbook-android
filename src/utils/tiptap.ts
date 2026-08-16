@@ -15,7 +15,7 @@ export function createEmptyDocJson(): string {
  * Extracts plain text from a recursive Tiptap node tree.
  */
 function extractNodeText(node: TiptapNode): string {
-  if (node.text) {
+  if (node.text !== undefined) {
     return node.text;
   }
   if (!node.content || node.content.length === 0) {
@@ -25,10 +25,11 @@ function extractNodeText(node: TiptapNode): string {
 }
 
 /**
- * Parses a Tiptap JSON string and returns a flat, human-readable text preview.
+ * Parses a Tiptap JSON string and returns a multiline text string.
+ * Preserves empty paragraphs and line breaks without stripping trailing newlines.
  */
 export function extractPlainText(jsonContent: string): string {
-  if (!jsonContent.trim()) {
+  if (!jsonContent) {
     return '';
   }
   try {
@@ -36,7 +37,7 @@ export function extractPlainText(jsonContent: string): string {
     if (!parsed.content || !Array.isArray(parsed.content)) {
       return '';
     }
-    return parsed.content.map(extractNodeText).join('\n').trim();
+    return parsed.content.map(extractNodeText).join('\n');
   } catch {
     return jsonContent;
   }
@@ -48,7 +49,7 @@ export function extractPlainText(jsonContent: string): string {
 export function textToTiptapDoc(text: string): string {
   const lines = text.split('\n');
   const nodes: TiptapNode[] = lines.map((line) => {
-    if (!line.trim()) {
+    if (line.length === 0) {
       return { type: 'paragraph' };
     }
     return {

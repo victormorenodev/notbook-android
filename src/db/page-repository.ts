@@ -4,10 +4,7 @@ import { generateEntityId } from '@/utils/id';
 import { createEmptyDocJson } from '@/utils/tiptap';
 
 /**
- * Fetches all non-deleted pages ordered by position and last update time.
- *
- * @example
- * const pages = await getLocalPages();
+ * Fetches all non-deleted pages ordered strictly by position ASC, then created_at ASC.
  */
 export async function getLocalPages(): Promise<Page[]> {
   const database = await getDatabase();
@@ -15,16 +12,13 @@ export async function getLocalPages(): Promise<Page[]> {
     SELECT id, title, content, position, created_at, updated_at, deleted_at, sync_status
     FROM pages
     WHERE deleted_at IS NULL
-    ORDER BY position ASC, updated_at DESC
+    ORDER BY position ASC, created_at ASC
   `;
   return database.getAllAsync<Page>(query);
 }
 
 /**
  * Fetches a single active page by its UUID.
- *
- * @example
- * const page = await getLocalPageById('uuid-123');
  */
 export async function getLocalPageById(id: string): Promise<Page | null> {
   const database = await getDatabase();
@@ -37,47 +31,60 @@ export async function getLocalPageById(id: string): Promise<Page | null> {
 }
 
 /**
- * Inserts a new page with a client-generated UUID and returns the created record.
- *
- * @example
- * const newPage = await insertLocalPage({ title: 'My Note' });
+ * Inserts a new page after a specified position, shifting all subsequent pages.
  */
-export async function insertLocalPage(input: CreatePageInput): Promise<Page> {
+export async function insertLocalPage(
+  input: CreatePageInput,
+  afterPosition?: number
+): Promise<Page> {
   const database = await getDatabase();
   const now = new Date().toISOString();
-  const page: Page = {
-    id: input.id ?? generateEntityId(),
+  const id = input.id ?? generateEntityId();
+
+  let targetPosition = 0;
+
+  await database.withTransactionAsync(async () => {
+    if (afterPosition !== undefined && afterPosition >= 0) {
+      targetPosition = afterPosition + 1;
+      await database.runAsync(
+        `UPDATE pages SET position = position + 1 WHERE position >= ? AND deleted_at IS NULL`,
+        [targetPosition]
+      );
+    } else {
+      const maxRow = await database.getFirstAsync<{ max_pos: number | null }>(
+        `SELECT MAX(position) as max_pos FROM pages WHERE deleted_at IS NULL`
+      );
+      targetPosition = maxRow?.max_pos !== null && maxRow?.max_pos !== undefined ? maxRow.max_pos + 1 : 0;
+    }
+
+    const query = `
+      INSERT INTO pages (id, title, content, position, created_at, updated_at, deleted_at, sync_status)
+      VALUES (?, ?, ?, ?, ?, ?, NULL, 'pending_create')
+    `;
+    await database.runAsync(query, [
+      id,
+      input.title.trim(),
+      input.content ?? createEmptyDocJson(),
+      targetPosition,
+      now,
+      now,
+    ]);
+  });
+
+  return {
+    id,
     title: input.title.trim(),
     content: input.content ?? createEmptyDocJson(),
-    position: input.position ?? 0,
+    position: targetPosition,
     created_at: now,
     updated_at: now,
     deleted_at: null,
     sync_status: 'pending_create',
   };
-
-  const query = `
-    INSERT INTO pages (id, title, content, position, created_at, updated_at, deleted_at, sync_status)
-    VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
-  `;
-  await database.runAsync(query, [
-    page.id,
-    page.title,
-    page.content,
-    page.position,
-    page.created_at,
-    page.updated_at,
-    page.sync_status ?? 'pending_create',
-  ]);
-
-  return page;
 }
 
 /**
  * Updates an existing page's title, content, or position and refreshes updated_at.
- *
- * @example
- * const updated = await updateLocalPage('uuid-123', { title: 'New Title' });
  */
 export async function updateLocalPage(
   id: string,
@@ -113,27 +120,28 @@ export async function updateLocalPage(
 }
 
 /**
- * Soft deletes a page by recording the deleted_at timestamp.
- *
- * @example
- * await softDeleteLocalPage('uuid-123');
+ * Soft deletes a page and collapses positions of subsequent pages.
  */
 export async function softDeleteLocalPage(id: string): Promise<void> {
   const database = await getDatabase();
+  const page = await getLocalPageById(id);
+  if (!page) return;
+
   const now = new Date().toISOString();
-  const query = `
-    UPDATE pages
-    SET deleted_at = ?, sync_status = 'pending_delete'
-    WHERE id = ?
-  `;
-  await database.runAsync(query, [now, id]);
+  await database.withTransactionAsync(async () => {
+    await database.runAsync(
+      `UPDATE pages SET deleted_at = ?, sync_status = 'pending_delete' WHERE id = ?`,
+      [now, id]
+    );
+    await database.runAsync(
+      `UPDATE pages SET position = position - 1 WHERE position > ? AND deleted_at IS NULL`,
+      [page.position]
+    );
+  });
 }
 
 /**
  * Batch updates note positions inside an atomic transaction.
- *
- * @example
- * await reorderLocalPages([{ id: 'uuid-1', position: 0 }, { id: 'uuid-2', position: 1 }]);
  */
 export async function reorderLocalPages(items: ReorderItem[]): Promise<void> {
   const database = await getDatabase();

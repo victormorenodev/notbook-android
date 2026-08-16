@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -27,24 +27,57 @@ function formatNoteDate(isoDate: string): string {
   });
 }
 
+/**
+ * Distraction-free single note editor sheet in Apple Notes style.
+ */
 export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
   const [title, setTitle] = useState(page.title);
   const [body, setBody] = useState(() => extractPlainText(page.content));
+  const activeNoteIdRef = useRef(page.id);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Sync state only when the active note ID changes (swiping between notes)
   useEffect(() => {
-    setTitle(page.title);
-    setBody(extractPlainText(page.content));
+    if (activeNoteIdRef.current !== page.id) {
+      activeNoteIdRef.current = page.id;
+      setTitle(page.title);
+      setBody(extractPlainText(page.content));
+    }
   }, [page.id, page.content, page.title]);
+
+  const scheduleSave = useCallback(
+    (newTitle: string, newBody: string) => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        onSave(page.id, {
+          title: newTitle,
+          content: textToTiptapDoc(newBody),
+        });
+      }, 350);
+    },
+    [onSave, page.id]
+  );
 
   const handleTitleChange = (newTitle: string) => {
     setTitle(newTitle);
-    onSave(page.id, { title: newTitle });
+    scheduleSave(newTitle, body);
   };
 
   const handleBodyChange = (newBody: string) => {
     setBody(newBody);
-    onSave(page.id, { content: textToTiptapDoc(newBody) });
+    scheduleSave(title, newBody);
   };
+
+  // Flush pending saves on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
   return (
     <View style={[styles.container, { width }]}>

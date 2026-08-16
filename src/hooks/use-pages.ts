@@ -16,9 +16,6 @@ export const PAGE_QUERY_KEYS = {
 
 /**
  * Hook to retrieve all active pages ordered by position.
- *
- * @example
- * const { data: pages = [], isLoading } = usePages();
  */
 export function usePages() {
   return useQuery<Page[]>({
@@ -29,9 +26,6 @@ export function usePages() {
 
 /**
  * Hook to retrieve a single active page by its UUID.
- *
- * @example
- * const { data: page, isLoading } = usePage('uuid-123');
  */
 export function usePage(id: string) {
   return useQuery<Page | null>({
@@ -41,17 +35,19 @@ export function usePage(id: string) {
   });
 }
 
+export interface CreatePageVariables {
+  input: CreatePageInput;
+  afterPosition?: number;
+}
+
 /**
- * Mutation hook to create a new page.
- *
- * @example
- * const { mutateAsync: createPage } = useCreatePage();
- * const newPage = await createPage({ title: 'Shopping' });
+ * Mutation hook to create a new page with relative positioning.
  */
 export function useCreatePage() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreatePageInput) => insertLocalPage(input),
+    mutationFn: ({ input, afterPosition }: CreatePageVariables) =>
+      insertLocalPage(input, afterPosition),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: PAGE_QUERY_KEYS.all });
     },
@@ -65,10 +61,6 @@ interface UpdatePageVariables {
 
 /**
  * Mutation hook to update an existing page.
- *
- * @example
- * const { mutateAsync: updatePage } = useUpdatePage();
- * await updatePage({ id: 'uuid-123', input: { title: 'Updated' } });
  */
 export function useUpdatePage() {
   const queryClient = useQueryClient();
@@ -85,10 +77,6 @@ export function useUpdatePage() {
 
 /**
  * Mutation hook to soft delete a page.
- *
- * @example
- * const { mutateAsync: deletePage } = useDeletePage();
- * await deletePage('uuid-123');
  */
 export function useDeletePage() {
   const queryClient = useQueryClient();
@@ -102,10 +90,6 @@ export function useDeletePage() {
 
 /**
  * Mutation hook to batch reorder pages.
- *
- * @example
- * const { mutateAsync: reorder } = useReorderPages();
- * await reorder([{ id: 'uuid-1', position: 0 }]);
  */
 export function useReorderPages() {
   const queryClient = useQueryClient();
