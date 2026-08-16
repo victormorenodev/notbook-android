@@ -2,10 +2,6 @@ import { PageContent, TiptapNode } from '@/types/note';
 
 /**
  * Generates a serialized JSON string representing an empty Tiptap document.
- *
- * @example
- * const defaultContent = createEmptyDocJson();
- * // => '{"type":"doc","content":[{"type":"paragraph"}]}'
  */
 export function createEmptyDocJson(): string {
   const emptyDoc: PageContent = {
@@ -30,10 +26,6 @@ function extractNodeText(node: TiptapNode): string {
 
 /**
  * Parses a Tiptap JSON string and returns a flat, human-readable text preview.
- *
- * @example
- * const preview = extractPlainText('{"type":"doc","content":[...]}');
- * // => "Remember to buy milk"
  */
 export function extractPlainText(jsonContent: string): string {
   if (!jsonContent.trim()) {
@@ -46,6 +38,29 @@ export function extractPlainText(jsonContent: string): string {
     }
     return parsed.content.map(extractNodeText).join('\n').trim();
   } catch {
-    return '';
+    return jsonContent;
   }
+}
+
+/**
+ * Converts a plain multiline text string into a structured Tiptap JSON document string.
+ */
+export function textToTiptapDoc(text: string): string {
+  const lines = text.split('\n');
+  const nodes: TiptapNode[] = lines.map((line) => {
+    if (!line.trim()) {
+      return { type: 'paragraph' };
+    }
+    return {
+      type: 'paragraph',
+      content: [{ type: 'text', text: line }],
+    };
+  });
+
+  const doc: PageContent = {
+    type: 'doc',
+    content: nodes.length > 0 ? nodes : [{ type: 'paragraph' }],
+  };
+
+  return JSON.stringify(doc);
 }

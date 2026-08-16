@@ -1,98 +1,215 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { NoteEditorSheet } from '@/components/note-editor-sheet';
+import { useCreatePage, useDeletePage, usePages, useUpdatePage } from '@/hooks/use-pages';
+import { Page } from '@/types/note';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+/**
+ * Main application screen implementing the Apple Notes-style swipe carousel.
+ */
+export default function NotesCarouselScreen() {
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const flatListRef = useRef<FlatList<Page>>(null);
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
+  const { data: pages = [], isLoading } = usePages();
+  const { mutateAsync: createPage } = useCreatePage();
+  const { mutateAsync: updatePage } = useUpdatePage();
+  const { mutateAsync: deletePage } = useDeletePage();
+
+  const [activeIndex, setActiveIndex] = useState(0);
+  const isCreatingRef = useRef(false);
+
+  // Initialize with a blank note if the database is empty
+  useEffect(() => {
+    if (!isLoading && pages.length === 0 && !isCreatingRef.current) {
+      isCreatingRef.current = true;
+      createPage({ title: '' }).finally(() => {
+        isCreatingRef.current = false;
+      });
+    }
+  }, [isLoading, pages.length, createPage]);
+
+  const scrollToPage = useCallback((index: number) => {
+    setActiveIndex(index);
+    flatListRef.current?.scrollToIndex({ index, animated: true });
+  }, []);
+
+  const handleCreateNewPage = useCallback(async () => {
+    const newPage = await createPage({ title: '' });
+    const targetIndex = pages.length;
+    setTimeout(() => {
+      scrollToPage(targetIndex);
+    }, 100);
+    return newPage;
+  }, [createPage, pages.length, scrollToPage]);
+
+  const handleScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const offsetX = event.nativeEvent.contentOffset.x;
+      const newIndex = Math.round(offsetX / width);
+
+      if (newIndex >= pages.length) {
+        handleCreateNewPage();
+        return;
+      }
+
+      if (newIndex < 0 && pages.length > 1) {
+        scrollToPage(pages.length - 1);
+        return;
+      }
+
+      setActiveIndex(Math.max(0, Math.min(newIndex, pages.length - 1)));
+    },
+    [handleCreateNewPage, pages.length, scrollToPage, width]
+  );
+
+  const handlePreviousPage = useCallback(() => {
+    if (pages.length <= 1) return;
+    const targetIndex = activeIndex === 0 ? pages.length - 1 : activeIndex - 1;
+    scrollToPage(targetIndex);
+  }, [activeIndex, pages.length, scrollToPage]);
+
+  const handleNextPage = useCallback(() => {
+    if (activeIndex === pages.length - 1) {
+      handleCreateNewPage();
+      return;
+    }
+    scrollToPage(activeIndex + 1);
+  }, [activeIndex, handleCreateNewPage, pages.length, scrollToPage]);
+
+  const handleDeleteCurrentPage = useCallback(async () => {
+    if (pages.length === 0) return;
+    const currentPage = pages[activeIndex];
+    if (!currentPage) return;
+
+    await deletePage(currentPage.id);
+    const nextIndex = Math.max(0, activeIndex - 1);
+    setActiveIndex(nextIndex);
+  }, [activeIndex, deletePage, pages]);
+
+  const handleSaveNote = useCallback(
+    (id: string, updates: { title?: string; content?: string }) => {
+      updatePage({ id, input: updates });
+    },
+    [updatePage]
+  );
+
+  if (isLoading) {
     return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#EAB308" />
+      </View>
     );
   }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+      <FlatList
+        ref={flatListRef}
+        data={pages}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <NoteEditorSheet page={item} width={width} onSave={handleSaveNote} />
+        )}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={handleScrollEnd}
+        getItemLayout={(_, index) => ({
+          length: width,
+          offset: width * index,
+          index,
+        })}
+      />
 
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+      <View style={styles.bottomBar}>
+        <TouchableOpacity
+          onPress={handleDeleteCurrentPage}
+          style={styles.barButton}
+          hitSlop={12}
+        >
+          <Text style={styles.deleteButtonText}>Delete</Text>
+        </TouchableOpacity>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+        <TouchableOpacity onPress={handlePreviousPage} hitSlop={12}>
+          <Text style={styles.navIndicatorText}>‹</Text>
+        </TouchableOpacity>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+        <Text style={styles.pageCounterText}>
+          {pages.length > 0 ? `${activeIndex + 1} of ${pages.length}` : 'New Note'}
+        </Text>
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+        <TouchableOpacity onPress={handleNextPage} hitSlop={12}>
+          <Text style={styles.navIndicatorText}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={handleCreateNewPage}
+          style={styles.barButton}
+          hitSlop={12}
+        >
+          <Text style={styles.newButtonText}>＋</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  bottomBar: {
+    height: 52,
     flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
     alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
   },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+  barButton: {
+    padding: 6,
   },
-  title: {
-    textAlign: 'center',
+  deleteButtonText: {
+    fontSize: 14,
+    color: '#EF4444',
+    fontWeight: '500',
   },
-  code: {
-    textTransform: 'uppercase',
+  pageCounterText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6B7280',
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  navIndicatorText: {
+    fontSize: 22,
+    color: '#9CA3AF',
+    fontWeight: '600',
+    paddingHorizontal: 8,
+  },
+  newButtonText: {
+    fontSize: 20,
+    color: '#EAB308',
+    fontWeight: '700',
   },
 });
