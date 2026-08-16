@@ -12,11 +12,12 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NoteEditorSheet } from '@/components/note-editor-sheet';
+import { NotesGridModal } from '@/components/notes-grid-modal';
 import { useCreatePage, useDeletePage, usePages, useUpdatePage } from '@/hooks/use-pages';
 import { Page } from '@/types/note';
 
 /**
- * Main application screen implementing the Apple Notes-style swipe carousel.
+ * Main application screen implementing the Apple Notes-style swipe carousel and grid overview.
  */
 export default function NotesCarouselScreen() {
   const { width } = useWindowDimensions();
@@ -29,6 +30,7 @@ export default function NotesCarouselScreen() {
   const { mutateAsync: deletePage } = useDeletePage();
 
   const [activeIndex, setActiveIndex] = useState(0);
+  const [isGridVisible, setIsGridVisible] = useState(false);
   const isInitializingRef = useRef(false);
 
   // Initialize with a blank note if the database is completely empty
@@ -140,6 +142,16 @@ export default function NotesCarouselScreen() {
         })}
       />
 
+      {/* Overview Grid Modal */}
+      <NotesGridModal
+        visible={isGridVisible}
+        pages={pages}
+        activeIndex={activeIndex}
+        onSelectPage={scrollToPage}
+        onClose={() => setIsGridVisible(false)}
+      />
+
+      {/* Bottom Bar */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
           onPress={handleDeleteCurrentPage}
@@ -153,9 +165,16 @@ export default function NotesCarouselScreen() {
           <Text style={styles.navIndicatorText}>‹</Text>
         </TouchableOpacity>
 
-        <Text style={styles.pageCounterText}>
-          {pages.length > 0 ? `${activeIndex + 1} of ${pages.length}` : 'New Note'}
-        </Text>
+        <TouchableOpacity
+          onPress={() => setIsGridVisible(true)}
+          style={styles.pageCounterButton}
+          hitSlop={12}
+        >
+          <Text style={styles.pageCounterText}>
+            {pages.length > 0 ? `${activeIndex + 1} of ${pages.length}` : 'New Note'}
+          </Text>
+          <Text style={styles.gridIconText}> ⊞</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity onPress={handleNextPage} hitSlop={12}>
           <Text style={styles.navIndicatorText}>›</Text>
@@ -202,10 +221,23 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     fontWeight: '500',
   },
+  pageCounterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+  },
   pageCounterText: {
     fontSize: 13,
     fontWeight: '600',
+    color: '#374151',
+  },
+  gridIconText: {
+    fontSize: 13,
     color: '#6B7280',
+    fontWeight: '700',
   },
   navIndicatorText: {
     fontSize: 22,
