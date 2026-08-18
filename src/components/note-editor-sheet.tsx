@@ -63,62 +63,85 @@ function insertPrefixAtCurrentLine(
 }
 
 /**
- * Checks if the difference between prevText and nextText is specifically an inserted newline.
+ * Returns the index where a single newline was inserted, or -1 if the change
+ * is not a single newline insertion.
  */
-function isNewlineAddition(prevText: string, nextText: string): boolean {
+function findNewlineInsertionIndex(prevText: string, nextText: string): number {
   if (nextText.length !== prevText.length + 1) {
-    return false;
+    return -1;
   }
   for (let i = 0; i < prevText.length; i++) {
     if (prevText[i] !== nextText[i]) {
-      return nextText[i] === '\n';
+      return nextText[i] === '\n' ? i : -1;
     }
   }
-  return nextText.endsWith('\n');
+  return nextText[nextText.length - 1] === '\n' ? nextText.length - 1 : -1;
 }
 
 /**
+ * Extracts the line content from `text` that contains the character at `index`.
+ * Returns { lineStart, lineContent }.
+ */
+function getLineAt(text: string, index: number): { lineStart: number; content: string } {
+  const lineStart = text.lastIndexOf('\n', Math.max(0, index - 1)) + 1;
+  const lineEnd = text.indexOf('\n', index);
+  const content = text.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+  return { lineStart, content };
+}
+
+/** Matches a checklist prefix like "[ ] " or "- [x] " */
+const CHECKLIST_ACTIVE = /^(-\s+)?\[( |x|X)\]\s+/;
+const CHECKLIST_EMPTY = /^(-\s+)?\[( |x|X)\]\s*$/;
+
+/** Matches a bullet prefix like "• " or "- " or "* " */
+const BULLET_ACTIVE = /^[•\-*]\s+/;
+const BULLET_EMPTY = /^[•\-*]\s*$/;
+
+/** Matches a numbered list prefix like "1. " */
+const NUMBERED_ACTIVE = /^(\d+)\.\s+/;
+
+/**
  * Handles Smart Enter behavior ONLY when a newline is actively pressed.
+ * Finds the actual insertion point and continues or exits the list on that line.
  */
 function applySmartEnter(prevText: string, nextText: string): string {
-  if (!isNewlineAddition(prevText, nextText)) {
+  const newlineIndex = findNewlineInsertionIndex(prevText, nextText);
+  if (newlineIndex === -1) {
     return nextText;
   }
 
-  const lines = nextText.split('\n');
-  const prevLineIndex = lines.length - 2;
-  const prevLine = lines[prevLineIndex]?.trim() || '';
+  // The line BEFORE the newline is the one that was just split
+  const prevLine = getLineAt(nextText, newlineIndex);
+  const prevContent = prevLine.content.trim();
 
-  // Empty checklist item -> exit checklist mode
-  if (/^(\-\s+)?\[( |x|X)\]\s*$/.test(prevLine)) {
-    lines[prevLineIndex] = '';
-    return lines.join('\n');
+  // The new (empty or partial) line starts right after the '\n'
+  const newLineStart = newlineIndex + 1;
+
+  // Empty checklist item -> exit checklist mode (clear the prefix)
+  if (CHECKLIST_EMPTY.test(prevContent)) {
+    return nextText.slice(0, prevLine.lineStart) + nextText.slice(newlineIndex);
   }
 
-  // Active checklist item -> continue checklist
-  if (/^(\-\s+)?\[( |x|X)\]\s+/.test(prevLine)) {
-    lines[lines.length - 1] = `[ ] ${lines[lines.length - 1]}`;
-    return lines.join('\n');
+  // Active checklist item -> continue checklist on new line
+  if (CHECKLIST_ACTIVE.test(prevContent)) {
+    return nextText.slice(0, newLineStart) + '[ ] ' + nextText.slice(newLineStart);
   }
 
   // Empty bullet item -> exit bullet mode
-  if (/^(\•|\-|\*)\s*$/.test(prevLine)) {
-    lines[prevLineIndex] = '';
-    return lines.join('\n');
+  if (BULLET_EMPTY.test(prevContent)) {
+    return nextText.slice(0, prevLine.lineStart) + nextText.slice(newlineIndex);
   }
 
   // Active bullet item -> continue bullet list
-  if (/^(\•|\-|\*)\s+/.test(prevLine)) {
-    lines[lines.length - 1] = `• ${lines[lines.length - 1]}`;
-    return lines.join('\n');
+  if (BULLET_ACTIVE.test(prevContent)) {
+    return nextText.slice(0, newLineStart) + '• ' + nextText.slice(newLineStart);
   }
 
   // Numbered list item -> auto-increment next number
-  const matchNum = prevLine.match(/^(\d+)\.\s+/);
+  const matchNum = prevContent.match(NUMBERED_ACTIVE);
   if (matchNum) {
     const nextNum = parseInt(matchNum[1], 10) + 1;
-    lines[lines.length - 1] = `${nextNum}. ${lines[lines.length - 1]}`;
-    return lines.join('\n');
+    return nextText.slice(0, newLineStart) + `${nextNum}. ` + nextText.slice(newLineStart);
   }
 
   return nextText;
