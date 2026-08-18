@@ -140,6 +140,7 @@ export default function NotesCarouselScreen() {
           offset: width * index,
           index,
         })}
+        keyboardShouldPersistTaps="always"
       />
 
       {/* Overview Grid Modal */}
