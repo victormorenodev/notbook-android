@@ -201,7 +201,10 @@ export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
     const showSub = Keyboard.addListener(showEvent, () => setIsKeyboardVisible(true));
-    const hideSub = Keyboard.addListener(hideEvent, () => setIsKeyboardVisible(false));
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setIsKeyboardVisible(false);
+      bodyInputRef.current?.blur();
+    });
 
     return () => {
       showSub.remove();
