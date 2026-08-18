@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FormattingToolbar } from '@/components/formatting-toolbar';
-import { NoteBodyView } from '@/components/note-body-view';
 import { Page } from '@/types/note';
 import { extractPlainText, textToTiptapDoc } from '@/utils/tiptap';
 
@@ -171,18 +170,15 @@ function toggleCheckboxAtLine(text: string, lineIndex: number): string {
   return text;
 }
 
-/**
- * Distraction-free single note editor sheet with rich text formatting and smart lists.
- */
+import { NoteBlockList } from '@/components/note-block-list';
+import { textToBlocks, blocksToText } from '@/utils/block-parser';
+
 export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
   const insets = useSafeAreaInsets();
-  const bodyInputRef = useRef<TextInput>(null);
 
   const [title, setTitle] = useState(page.title);
-  const [body, setBody] = useState(() => extractPlainText(page.content));
-  const [selection, setSelection] = useState({ start: 0, end: 0 });
+  const [blocks, setBlocks] = useState(() => textToBlocks(extractPlainText(page.content)));
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-  const [isBodyFocused, setIsBodyFocused] = useState(false);
 
   const activeNoteIdRef = useRef(page.id);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -192,7 +188,7 @@ export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
     if (activeNoteIdRef.current !== page.id) {
       activeNoteIdRef.current = page.id;
       setTitle(page.title);
-      setBody(extractPlainText(page.content));
+      setBlocks(textToBlocks(extractPlainText(page.content)));
     }
   }, [page.id, page.content, page.title]);
 
@@ -201,10 +197,7 @@ export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
     const showSub = Keyboard.addListener(showEvent, () => setIsKeyboardVisible(true));
-    const hideSub = Keyboard.addListener(hideEvent, () => {
-      setIsKeyboardVisible(false);
-      bodyInputRef.current?.blur();
-    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setIsKeyboardVisible(false));
 
     return () => {
       showSub.remove();
@@ -212,22 +205,15 @@ export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
     };
   }, []);
 
-  // Focus the body TextInput when entering edit mode from read mode
-  useEffect(() => {
-    if (isBodyFocused) {
-      setTimeout(() => bodyInputRef.current?.focus(), 50);
-    }
-  }, [isBodyFocused]);
-
   const scheduleSave = useCallback(
-    (newTitle: string, newBody: string) => {
+    (newTitle: string, newBlocks: typeof blocks) => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
       debounceTimerRef.current = setTimeout(() => {
         onSave(page.id, {
           title: newTitle,
-          content: textToTiptapDoc(newBody),
+          content: textToTiptapDoc(blocksToText(newBlocks)),
         });
       }, 350);
     },
@@ -236,35 +222,23 @@ export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
 
   const handleTitleChange = (newTitle: string) => {
     setTitle(newTitle);
-    scheduleSave(newTitle, body);
+    scheduleSave(newTitle, blocks);
   };
 
-  const handleBodyChange = (rawBody: string) => {
-    const smartBody = applySmartEnter(body, rawBody);
-    setBody(smartBody);
-    scheduleSave(title, smartBody);
+  const handleChangeBlock = (id: string, newContent: string) => {
+    setBlocks((prev) => {
+      const next = prev.map((b) => (b.id === id ? { ...b, content: newContent } : b));
+      scheduleSave(title, next);
+      return next;
+    });
   };
 
-  const handleSelectionChange = (
-    e: NativeSyntheticEvent<TextInputSelectionChangeEventData>
-  ) => {
-    setSelection(e.nativeEvent.selection);
-  };
-
-  const handleInsertFormat = (prefix: string) => {
-    const updated = insertPrefixAtCurrentLine(body, selection.start, prefix);
-    setBody(updated);
-    scheduleSave(title, updated);
-  };
-
-  const handleToggleCheckbox = (lineIndex: number) => {
-    const updated = toggleCheckboxAtLine(body, lineIndex);
-    setBody(updated);
-    scheduleSave(title, updated);
-  };
-
-  const handleTapBody = () => {
-    setIsBodyFocused(true);
+  const handleToggleCheck = (id: string) => {
+    setBlocks((prev) => {
+      const next = prev.map((b) => (b.id === id ? { ...b, checked: !b.checked } : b));
+      scheduleSave(title, next);
+      return next;
+    });
   };
 
   return (
@@ -292,52 +266,13 @@ export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
             returnKeyType="next"
           />
 
-          {isBodyFocused || body.length === 0 ? (
-            <TextInput
-              ref={bodyInputRef}
-              value={body}
-              onChangeText={handleBodyChange}
-              onSelectionChange={handleSelectionChange}
-              onBlur={() => setIsBodyFocused(false)}
-              placeholder="Start typing your note..."
-              placeholderTextColor="#9CA3AF"
-              style={styles.bodyInput}
-              multiline
-              scrollEnabled={false}
-              textAlignVertical="top"
-              inputAccessoryViewID={Platform.OS === 'ios' ? ACCESSORY_VIEW_ID : undefined}
-            />
-          ) : (
-            <NoteBodyView
-              body={body}
-              onToggleCheckbox={handleToggleCheckbox}
-              onTapBody={handleTapBody}
-            />
-          )}
+          <NoteBlockList
+            blocks={blocks}
+            onChangeBlock={handleChangeBlock}
+            onToggleCheck={handleToggleCheck}
+          />
         </ScrollView>
-
-        {/* Android Keyboard Accessory */}
-        {Platform.OS === 'android' && isKeyboardVisible && (
-          <FormattingToolbar
-            onInsertChecklist={() => handleInsertFormat('[ ] ')}
-            onInsertBullet={() => handleInsertFormat('• ')}
-            onInsertNumbered={() => handleInsertFormat('1. ')}
-            onInsertHeading={() => handleInsertFormat('## ')}
-          />
-        )}
       </KeyboardAvoidingView>
-
-      {/* iOS Native Keyboard Accessory View */}
-      {Platform.OS === 'ios' && (
-        <InputAccessoryView nativeID={ACCESSORY_VIEW_ID}>
-          <FormattingToolbar
-            onInsertChecklist={() => handleInsertFormat('[ ] ')}
-            onInsertBullet={() => handleInsertFormat('• ')}
-            onInsertNumbered={() => handleInsertFormat('1. ')}
-            onInsertHeading={() => handleInsertFormat('## ')}
-          />
-        </InputAccessoryView>
-      )}
     </View>
   );
 }
