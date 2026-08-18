@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FormattingToolbar } from '@/components/formatting-toolbar';
+import { NoteBodyView } from '@/components/note-body-view';
 import { Page } from '@/types/note';
 import { extractPlainText, textToTiptapDoc } from '@/utils/tiptap';
 
@@ -148,6 +149,29 @@ function applySmartEnter(prevText: string, nextText: string): string {
 }
 
 /**
+ * Toggles a checkbox on the specified line between checked [x] and unchecked [ ].
+ * Returns the text unchanged if the line is not a checklist item.
+ */
+function toggleCheckboxAtLine(text: string, lineIndex: number): string {
+  const lines = text.split('\n');
+  if (lineIndex < 0 || lineIndex >= lines.length) return text;
+
+  const line = lines[lineIndex];
+
+  if (/^(-\s+)?\[ \]/.test(line)) {
+    lines[lineIndex] = line.replace('[ ]', '[x]');
+    return lines.join('\n');
+  }
+
+  if (/^(-\s+)?\[[xX]\]/.test(line)) {
+    lines[lineIndex] = line.replace(/\[[xX]\]/, '[ ]');
+    return lines.join('\n');
+  }
+
+  return text;
+}
+
+/**
  * Distraction-free single note editor sheet with rich text formatting and smart lists.
  */
 export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
@@ -158,6 +182,7 @@ export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
   const [body, setBody] = useState(() => extractPlainText(page.content));
   const [selection, setSelection] = useState({ start: 0, end: 0 });
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [isBodyFocused, setIsBodyFocused] = useState(false);
 
   const activeNoteIdRef = useRef(page.id);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -183,6 +208,13 @@ export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
       hideSub.remove();
     };
   }, []);
+
+  // Focus the body TextInput when entering edit mode from read mode
+  useEffect(() => {
+    if (isBodyFocused) {
+      setTimeout(() => bodyInputRef.current?.focus(), 50);
+    }
+  }, [isBodyFocused]);
 
   const scheduleSave = useCallback(
     (newTitle: string, newBody: string) => {
@@ -222,6 +254,16 @@ export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
     scheduleSave(title, updated);
   };
 
+  const handleToggleCheckbox = (lineIndex: number) => {
+    const updated = toggleCheckboxAtLine(body, lineIndex);
+    setBody(updated);
+    scheduleSave(title, updated);
+  };
+
+  const handleTapBody = () => {
+    setIsBodyFocused(true);
+  };
+
   return (
     <View style={[styles.container, { width }]}>
       <KeyboardAvoidingView
@@ -247,19 +289,28 @@ export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
             returnKeyType="next"
           />
 
-          <TextInput
-            ref={bodyInputRef}
-            value={body}
-            onChangeText={handleBodyChange}
-            onSelectionChange={handleSelectionChange}
-            placeholder="Start typing your note..."
-            placeholderTextColor="#9CA3AF"
-            style={styles.bodyInput}
-            multiline
-            scrollEnabled={false}
-            textAlignVertical="top"
-            inputAccessoryViewID={Platform.OS === 'ios' ? ACCESSORY_VIEW_ID : undefined}
-          />
+          {isBodyFocused || body.length === 0 ? (
+            <TextInput
+              ref={bodyInputRef}
+              value={body}
+              onChangeText={handleBodyChange}
+              onSelectionChange={handleSelectionChange}
+              onBlur={() => setIsBodyFocused(false)}
+              placeholder="Start typing your note..."
+              placeholderTextColor="#9CA3AF"
+              style={styles.bodyInput}
+              multiline
+              scrollEnabled={false}
+              textAlignVertical="top"
+              inputAccessoryViewID={Platform.OS === 'ios' ? ACCESSORY_VIEW_ID : undefined}
+            />
+          ) : (
+            <NoteBodyView
+              body={body}
+              onToggleCheckbox={handleToggleCheckbox}
+              onTapBody={handleTapBody}
+            />
+          )}
         </ScrollView>
 
         {/* Android Keyboard Accessory */}
