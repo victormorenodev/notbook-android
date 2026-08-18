@@ -157,3 +157,12 @@ Follow this checklist — no existing file should need modification:
 3. `hooks/use-<domain>.ts` — react-query hooks wrapping the API functions.
 4. `components/` — any domain-specific UI components.
 5. `app/` — new screen or tab if needed.
+
+
+---
+
+## Agentic Teaching & Communication
+
+- **Educational Focus:** This project is used for learning. When completing tasks, always provide a "tour" explanation.
+- **Tour Content:** Focus on teaching the user about critical decisions, tricky code parts, system design, and the intention behind the code. Maximize the apprenticeship value.
+- **Task Granularity:** When executing complex refactors, split the work into smaller modular tasks and commit them individually. Complete ONE task at a time and provide the educational tour after each step.
