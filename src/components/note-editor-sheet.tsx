@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { Page } from '@/types/note';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RichText, Toolbar, useEditorBridge } from '@10play/tentap-editor';
+
 function formatNoteDate(isoDate: string): string {
   const date = new Date(isoDate);
   return date.toLocaleDateString('en-US', {
@@ -20,6 +22,7 @@ function formatNoteDate(isoDate: string): string {
     minute: '2-digit',
   });
 }
+
 interface NoteEditorSheetProps {
   page: Page;
   width: number;
@@ -29,44 +32,84 @@ interface NoteEditorSheetProps {
 export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
   const insets = useSafeAreaInsets();
   const [title, setTitle] = useState(page.title);
+  
   const activeNoteIdRef = useRef(page.id);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorRef = useRef<any>(null);
 
-  // Sync title when switching to a different note ID
-  useEffect(() => {
-    if (activeNoteIdRef.current !== page.id) {
-      activeNoteIdRef.current = page.id;
-      setTitle(page.title);
+  // We need to safely parse the initial content. If it's valid JSON (Tiptap format), use the object.
+  // Otherwise, use it as a raw string.
+  const getInitialContent = (content: string) => {
+    if (!content) return '';
+    try {
+      return JSON.parse(content);
+    } catch {
+      return content;
     }
-  }, [page.id, page.title]);
+  };
 
   const scheduleSave = useCallback(
-    (newTitle: string) => {
+    (newTitle: string, newContentJson?: string) => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
       debounceTimerRef.current = setTimeout(() => {
-        onSave(page.id, {
-          title: newTitle,
-        });
-      }, 350);
+        const updates: Partial<Page> = { title: newTitle };
+        if (newContentJson !== undefined) {
+          updates.content = newContentJson;
+        }
+        onSave(page.id, updates);
+      }, 500);
     },
     [onSave, page.id]
   );
 
+  const editor = useEditorBridge({
+    autofocus: false,
+    avoidIosKeyboard: true,
+    initialContent: getInitialContent(page.content),
+    onChange: () => {
+      if (editorRef.current) {
+        editorRef.current.getJSON().then((json: any) => {
+          // Use a ref to get the most up-to-date title during save
+          scheduleSave(titleRef.current, JSON.stringify(json));
+        });
+      }
+    },
+  });
+  
+  editorRef.current = editor;
+
+  // We need a ref for title so the onChange closure can read the latest title
+  const titleRef = useRef(title);
+  titleRef.current = title;
+
+  // Sync state when switching to a different note ID
+  useEffect(() => {
+    if (activeNoteIdRef.current !== page.id) {
+      activeNoteIdRef.current = page.id;
+      setTitle(page.title);
+      titleRef.current = page.title;
+      editor.setContent(getInitialContent(page.content));
+    }
+  }, [page.id, page.content, page.title, editor]);
+
   const handleTitleChange = (newTitle: string) => {
     setTitle(newTitle);
+    titleRef.current = newTitle;
     scheduleSave(newTitle);
   };
 
   return (
     <SafeAreaView style={[styles.container, { width }]}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardContainer}
       >
-        <View style={styles.content}>
-          <Text style={styles.dateStamp}>{formatNoteDate(page.updated_at)}</Text>
+        <View style={styles.header}>
+          <Text style={styles.dateStamp}>
+            {formatNoteDate ? formatNoteDate(page.updated_at) : page.updated_at}
+          </Text>
           <TextInput
             value={title}
             onChangeText={handleTitleChange}
@@ -76,8 +119,13 @@ export function NoteEditorSheet({ page, width, onSave }: NoteEditorSheetProps) {
             multiline={false}
             returnKeyType="next"
           />
-          {/* WebView Editor will go here in Step 3 */}
         </View>
+        
+        <View style={styles.editorWrapper}>
+          <RichText editor={editor} />
+        </View>
+
+        <Toolbar editor={editor} />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -91,11 +139,14 @@ const styles = StyleSheet.create({
   keyboardContainer: {
     flex: 1,
   },
-  content: {
-    flex: 1,
+  header: {
     paddingHorizontal: 24,
     paddingTop: 16,
-    paddingBottom: 24,
+    paddingBottom: 8,
+  },
+  editorWrapper: {
+    flex: 1,
+    paddingHorizontal: 24,
   },
   dateStamp: {
     fontSize: 12,
@@ -108,7 +159,7 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: '700',
     color: '#111827',
-    marginBottom: 16,
+    marginBottom: 0, // removed bottom margin since editorWrapper handles spacing
     padding: 0,
   },
 });
